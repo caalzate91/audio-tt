@@ -67,7 +67,7 @@ const pcmToWavUrl = (base64Data, sampleRate) => {
 };
 
 export default function App() {
-    const [apiKey, setApiKey] = useState(import.meta.env.VITE_GEMINI_API_KEY || '');
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
     const [script, setScript] = useState('');
     const [voice, setVoice] = useState(VOICES[0]);
     const [isLoading, setIsLoading] = useState(false);
@@ -77,7 +77,7 @@ export default function App() {
 
     const handleGenerate = async () => {
         if (!apiKey.trim()) {
-            setError("Por favor, ingresa tu API Key de Gemini para poder conectarte al servicio.");
+            setError("No se encontró la API Key de Gemini. Por favor configúrala en el archivo .env (VITE_GEMINI_API_KEY).");
             return;
         }
 
@@ -153,24 +153,6 @@ export default function App() {
 
                 {/* Contenido principal */}
                 <div className="p-6 sm:p-8 flex flex-col gap-6">
-
-                    { }
-                    <div className="flex flex-col gap-2 p-4 bg-indigo-50 border border-indigo-100 rounded-xl">
-                        <div className="flex justify-between items-center">
-                            <label htmlFor="apiKey" className="font-semibold text-indigo-900">API Key de Gemini</label>
-                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" className="text-xs text-indigo-600 hover:text-indigo-800 underline">
-                                ¿No tienes una? Consíguela aquí
-                            </a>
-                        </div>
-                        <input
-                            type="password"
-                            id="apiKey"
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            placeholder="Pega tu API Key aquí (ej: AIzaSy...)"
-                            className="w-full p-3 border border-indigo-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 transition-all text-slate-700 bg-white"
-                        />
-                    </div>
 
                     {/* Área de texto */}
                     <div className="flex flex-col gap-2">
