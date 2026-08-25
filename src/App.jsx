@@ -496,7 +496,13 @@ ${block.text}`;
                 {/* Tabs / Switcher */}
                 <div className="flex border-b border-slate-700">
                     <button
-                        onClick={() => setActiveTab('blocks')}
+                        onClick={() => {
+                            if (activeTab === 'raw') {
+                                handleParseRawScript();
+                            } else {
+                                setActiveTab('blocks');
+                            }
+                        }}
                         className={`flex-1 py-4 text-center font-bold transition-all text-sm sm:text-base border-b-2 flex items-center justify-center gap-2 ${
                             activeTab === 'blocks'
                                 ? 'border-violet-500 text-violet-400 bg-slate-800'
@@ -509,7 +515,10 @@ ${block.text}`;
                         Editor de Bloques
                     </button>
                     <button
-                        onClick={() => setActiveTab('raw')}
+                        onClick={() => {
+                            syncBlocksToRawScript(blocks);
+                            setActiveTab('raw');
+                        }}
                         className={`flex-1 py-4 text-center font-bold transition-all text-sm sm:text-base border-b-2 flex items-center justify-center gap-2 ${
                             activeTab === 'raw'
                                 ? 'border-violet-500 text-violet-400 bg-slate-800'
