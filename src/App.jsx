@@ -22,18 +22,29 @@ const ACCENT_PRESETS = [
     { label: "Excited & Joyful", value: "Excited, enthusiastic, and joyful tone" }
 ];
 
-// Función para manejar reintentos de conexión con la API
-const fetchWithRetry = async (url, options, retries = 5) => {
+// Función para manejar reintentos de conexión con la API y registrar logs
+const fetchWithRetry = async (url, options, retries = 3) => {
     let delay = 1000;
     for (let i = 0; i < retries; i++) {
         try {
+            console.log(`[Gemini TTS] Intento ${i + 1}/${retries} enviando petición a Gemini...`);
+            const startTime = performance.now();
             const res = await fetch(url, options);
+            const duration = Math.round(performance.now() - startTime);
+
+            console.log(`[Gemini TTS] Respuesta HTTP recibida en ${duration}ms. Status: ${res.status} ${res.statusText}`);
+
             if (!res.ok) {
                 const errText = await res.text();
-                throw new Error(`Error HTTP: ${res.status}, Mensaje: ${errText}`);
+                console.error(`[Gemini TTS] Error en respuesta de Gemini (${res.status}):`, errText);
+                throw new Error(`Error HTTP: ${res.status} - ${errText}`);
             }
-            return await res.json();
+
+            const json = await res.json();
+            console.log(`[Gemini TTS] Datos JSON parseados correctamente:`, json);
+            return json;
         } catch (e) {
+            console.warn(`[Gemini TTS] Error en intento ${i + 1}:`, e.message);
             if (i === retries - 1) throw e;
             await new Promise(r => setTimeout(r, delay));
             delay *= 2;
@@ -90,7 +101,11 @@ const pcmToWavUrl = (base64Data, sampleRate) => {
 };
 
 export default function App() {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+    const envApiKey = import.meta.env.VITE_GEMINI_API_KEY || '';
+    const envModel = import.meta.env.VITE_GEMINI_MODEL || 'gemini-2.5-flash-preview-tts';
+    const [apiKey, setApiKey] = useState(() => localStorage.getItem('gemini_api_key') || envApiKey);
+    const [modelName, setModelName] = useState(() => localStorage.getItem('gemini_model') || envModel);
+    const [showKeyInput, setShowKeyInput] = useState(false);
     
     // Estados principales
     const [activeTab, setActiveTab] = useState('blocks'); // 'blocks' | 'raw'
@@ -108,7 +123,20 @@ export default function App() {
     const [globalLoading, setGlobalLoading] = useState(false);
     const [mergedAudioUrl, setMergedAudioUrl] = useState(null);
     const [error, setError] = useState('');
+    const [statusLog, setStatusLog] = useState('');
     const mergedAudioRef = useRef(null);
+
+    // Guardar API Key en localStorage al cambiar
+    const handleApiKeyChange = (newKey) => {
+        setApiKey(newKey);
+        localStorage.setItem('gemini_api_key', newKey);
+    };
+
+    // Guardar modelo en localStorage al cambiar
+    const handleModelChange = (newModel) => {
+        setModelName(newModel);
+        localStorage.setItem('gemini_model', newModel);
+    };
 
     // Sincronizar cambios en bloques hacia el script raw
     const syncBlocksToRawScript = (currentBlocks) => {
@@ -270,22 +298,29 @@ export default function App() {
         }
     };
 
-    // Generar audio para un solo bloque
+    // PREESCUCHAR: Genera audio para UN SOLO bloque seleccionado
     const generateSingleBlock = async (id) => {
-        if (!apiKey.trim()) {
-            setError("API Key no configurada. Edita el archivo .env.");
+        const cleanKey = apiKey.trim();
+        if (!cleanKey) {
+            setError("API Key no configurada. Ingresa tu API Key de Gemini.");
             return;
         }
 
+        const selectedModel = (modelName || envModel).trim() || 'gemini-2.5-flash-preview-tts';
         const block = blocks.find(b => b.id === id);
         if (!block || !block.text.trim()) return;
 
-        // Actualizar estado del bloque a cargando
+        console.group(`🎧 [Gemini TTS] Preescuchando bloque individual #${id} (${block.voice})`);
+        console.log(`Modelo: ${selectedModel}`);
+        console.log(`Texto: "${block.text}"`);
+        console.log(`Voz: ${block.voice}, Acento/Estilo: ${block.accent}`);
+
         setBlocks(prev => prev.map(b => b.id === id ? { ...b, status: 'generating' } : b));
         setError('');
+        setStatusLog(`Preescuchando bloque #${id} (${block.voice}) con modelo ${selectedModel}...`);
 
         try {
-            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey.trim()}`;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${cleanKey}`;
             const promptText = `AUDIO PROFILE:
 Voice persona: ${block.voice}
 Accent and style: ${block.accent}
@@ -307,8 +342,10 @@ ${block.text}`;
                         }
                     }
                 },
-                model: "gemini-2.5-flash-preview-tts"
+                model: selectedModel
             };
+
+            console.log('[Gemini TTS] Payload de preescucha:', payload);
 
             const data = await fetchWithRetry(url, {
                 method: 'POST',
@@ -316,17 +353,20 @@ ${block.text}`;
                 body: JSON.stringify(payload)
             });
 
+            console.log('[Gemini TTS] Respuesta recibida de Gemini para preescucha:', data);
+
             const inlineData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-            if (!inlineData) {
-                throw new Error("Respuesta sin datos de audio.");
+            if (!inlineData || !inlineData.data) {
+                throw new Error("La respuesta de Gemini no contiene datos de audio.");
             }
 
             const mimeType = inlineData.mimeType || '';
             const rateMatch = mimeType.match(/rate=(\d+)/);
             const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+            const wavInfo = pcmToWavUrl(inlineData.data, sampleRate);
 
-            const base64Data = inlineData.data;
-            const wavInfo = pcmToWavUrl(base64Data, sampleRate);
+            console.log(`[Gemini TTS] Audio de bloque #${id} generado con éxito. Sample rate: ${sampleRate}Hz, Tamaño: ${wavInfo.bytes.length} bytes`);
+            console.groupEnd();
 
             setBlocks(prev => prev.map(b => b.id === id ? {
                 ...b,
@@ -336,117 +376,115 @@ ${block.text}`;
                 status: 'success'
             } : b));
 
+            setStatusLog(`✅ Audio individual del bloque #${id} listo.`);
         } catch (err) {
-            console.error(err);
+            console.error(`[Gemini TTS] Error al preescuchar bloque #${id}:`, err);
+            console.groupEnd();
             setBlocks(prev => prev.map(b => b.id === id ? { ...b, status: 'error' } : b));
-            setError(`Error al generar bloque: ${err.message}`);
+            setError(`Error al preescuchar bloque: ${err.message}`);
+            setStatusLog(`❌ Error en bloque #${id}: ${err.message}`);
         }
     };
 
-    // Generar todos los bloques y unirlos
+    // GENERAR AUDIO COMPLETO (1 SOLA LLAMADA A LA API CON TODAS LAS LÍNEAS DE DIÁLOGO)
     const handleGenerateAllAndMerge = async () => {
-        if (!apiKey.trim()) {
-            setError("API Key no configurada. Configúrala en el archivo .env.");
+        const cleanKey = apiKey.trim();
+        if (!cleanKey) {
+            setError("API Key no configurada. Ingresa tu API Key de Gemini en la parte superior.");
+            return;
+        }
+
+        const selectedModel = (modelName || envModel).trim() || 'gemini-2.5-flash-preview-tts';
+        const activeBlocks = blocks.filter(b => b.text.trim().length > 0);
+        if (activeBlocks.length === 0) {
+            setError("No hay texto en los bloques de diálogo para generar audio.");
             return;
         }
 
         setGlobalLoading(true);
         setError('');
         setMergedAudioUrl(null);
+        setStatusLog(`Enviando guion completo (${activeBlocks.length} líneas) a Gemini [${selectedModel}] en 1 sola llamada...`);
 
+        console.group(`🎙️ [Gemini TTS] Generando Audio Completo con modelo ${selectedModel} (1 sola petición a la API)`);
+        console.log(`Total de líneas a procesar: ${activeBlocks.length}`);
+        console.log(`Modelo utilizado: ${selectedModel}`);
+        
         try {
-            // Generar todos los bloques en paralelo/secuencial que no estén generados aún o todos
-            const updatedBlocks = [...blocks];
+            // Construir el perfil de personajes y el guion consolidado
+            const characterProfiles = activeBlocks.map((b, idx) => 
+                `- Personaje ${idx + 1} (${b.voice}): Voz y tono en "${b.accent}"`
+            ).join('\n');
 
-            for (let i = 0; i < updatedBlocks.length; i++) {
-                const block = updatedBlocks[i];
-                if (!block.text.trim()) continue;
+            const transcriptText = activeBlocks.map(b => 
+                `[${b.voice}]: ${b.text}`
+            ).join('\n');
 
-                // Solo generar si no se ha generado previamente o está en estado de error
-                if (!block.pcmData || block.status === 'error' || block.status === 'idle') {
-                    // Actualizar estado visual
-                    setBlocks(prev => prev.map(b => b.id === block.id ? { ...b, status: 'generating' } : b));
-
-                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey.trim()}`;
-                    const promptText = `AUDIO PROFILE:
-Voice persona: ${block.voice}
-Accent and style: ${block.accent}
+            const promptText = `AUDIO PROFILE:
+${characterProfiles}
 
 DIRECTOR'S NOTES:
-Read the transcript below. Speak naturally, clearly, and with the exact accent and style requested.
-Do not read any section headers, metadata, or instructions. Only speak the text in the TRANSCRIPT section.
+Perform the following dialogue transcript smoothly and continuously as a multi-character scene.
+Adopt the appropriate voice persona, accent, emotion, and tone for each character according to the AUDIO PROFILE.
+Do not read character labels like [Aoede], brackets, section titles, metadata, or instructions.
+Only speak the actual dialogue text naturally.
 
 TRANSCRIPT:
-${block.text}`;
+${transcriptText}`;
 
-                    const payload = {
-                        contents: [{ parts: [{ text: promptText }] }],
-                        generationConfig: {
-                            responseModalities: ["AUDIO"],
-                            speechConfig: {
-                                voiceConfig: {
-                                    prebuiltVoiceConfig: { voiceName: block.voice }
-                                }
-                            }
-                        },
-                        model: "gemini-2.5-flash-preview-tts"
-                    };
+            const primaryVoice = activeBlocks[0]?.voice || VOICES[0];
 
-                    const data = await fetchWithRetry(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    const inlineData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-                    if (!inlineData) {
-                        throw new Error(`Fallo en el bloque ${i + 1}`);
+            const payload = {
+                contents: [{ parts: [{ text: promptText }] }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: primaryVoice }
+                        }
                     }
+                },
+                model: selectedModel
+            };
 
-                    const mimeType = inlineData.mimeType || '';
-                    const rateMatch = mimeType.match(/rate=(\d+)/);
-                    const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${cleanKey}`;
 
-                    const wavInfo = pcmToWavUrl(inlineData.data, sampleRate);
-                    
-                    block.audioUrl = wavInfo.url;
-                    block.pcmData = wavInfo.bytes;
-                    block.sampleRate = sampleRate;
-                    block.status = 'success';
+            console.log('[Gemini TTS] URL de la petición:', `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=***`);
+            console.log('[Gemini TTS] Prompt enviado a Gemini:\n', promptText);
+            console.log('[Gemini TTS] Payload completo:', payload);
 
-                    // Actualizar estado en tiempo real
-                    setBlocks(prev => prev.map(b => b.id === block.id ? {
-                        ...b,
-                        audioUrl: wavInfo.url,
-                        pcmData: wavInfo.bytes,
-                        sampleRate: sampleRate,
-                        status: 'success'
-                    } : b));
-                }
+            const data = await fetchWithRetry(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            console.log('[Gemini TTS] Respuesta completa de Gemini:', data);
+
+            const inlineData = data.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+            if (!inlineData || !inlineData.data) {
+                console.error('[Gemini TTS] Estructura inesperada en la respuesta de Gemini:', data);
+                throw new Error("La respuesta de Gemini no devolvió datos de audio en Base64.");
             }
 
-            // Concatenar todos los PCM
-            const activeBlocks = updatedBlocks.filter(b => b.pcmData && b.pcmData.length > 0);
-            if (activeBlocks.length === 0) {
-                throw new Error("No hay bloques de audio generados para combinar.");
-            }
+            const mimeType = inlineData.mimeType || '';
+            const rateMatch = mimeType.match(/rate=(\d+)/);
+            const sampleRate = rateMatch ? parseInt(rateMatch[1], 10) : 24000;
+            
+            console.log(`[Gemini TTS] Decodificando audio Base64 PCM... Formato: ${mimeType}, Sample Rate: ${sampleRate}Hz`);
+            const wavInfo = pcmToWavUrl(inlineData.data, sampleRate);
 
-            const totalLength = activeBlocks.reduce((acc, b) => acc + b.pcmData.length, 0);
-            const mergedPCM = new Uint8Array(totalLength);
-            let offset = 0;
+            console.log(`[Gemini TTS] ✅ Audio WAV final generado con éxito (${wavInfo.bytes.length} bytes). URL:`, wavInfo.url);
+            console.groupEnd();
 
-            for (const b of activeBlocks) {
-                mergedPCM.set(b.pcmData, offset);
-                offset += b.pcmData.length;
-            }
-
-            const baseSampleRate = activeBlocks[0].sampleRate || 24000;
-            const mergedWav = pcmToWavUrlFromUint8(mergedPCM, baseSampleRate);
-            setMergedAudioUrl(mergedWav);
+            setMergedAudioUrl(wavInfo.url);
+            setStatusLog(`✅ Audio completo generado con éxito con modelo ${selectedModel} en 1 sola llamada.`);
 
         } catch (err) {
-            console.error(err);
-            setError(`Error al combinar audios: ${err.message}`);
+            console.error('[Gemini TTS] ❌ Error general generando audio completo:', err);
+            console.groupEnd();
+            setError(`Error al generar el audio: ${err.message}`);
+            setStatusLog(`❌ Error: ${err.message}`);
         } finally {
             setGlobalLoading(false);
         }
@@ -462,13 +500,13 @@ ${block.text}`;
         document.body.removeChild(a);
     };
 
-    // Descargar todas las pistas individuales
+    // Descargar todas las pistas individuales si existen
     const downloadAllTracks = () => {
         blocks.forEach((block, idx) => {
             if (block.audioUrl) {
                 setTimeout(() => {
                     triggerDownload(block.audioUrl, `pista_${idx + 1}_${block.voice}_${block.accent.split(' ')[0]}.wav`);
-                }, idx * 400); // Pequeño delay para no saturar las descargas del navegador
+                }, idx * 400);
             }
         });
     };
@@ -479,8 +517,17 @@ ${block.text}`;
                 
                 {/* Header */}
                 <div className="bg-gradient-to-r from-violet-600 via-indigo-600 to-blue-600 p-6 sm:p-8 text-white relative">
-                    <div className="absolute top-4 right-4 bg-emerald-500 text-slate-950 font-bold px-3 py-1 rounded-full text-xs uppercase tracking-wider animate-pulse">
-                        Multi-Voice Ready
+                    <div className="absolute top-4 right-4 flex items-center gap-2">
+                        <button
+                            onClick={() => setShowKeyInput(!showKeyInput)}
+                            className="bg-slate-900/60 hover:bg-slate-900/80 text-violet-200 hover:text-white px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all border border-violet-400/30"
+                        >
+                            <span className={`w-2 h-2 rounded-full ${apiKey.trim() ? 'bg-emerald-400' : 'bg-amber-400 animate-ping'}`}></span>
+                            {apiKey.trim() ? 'API Key Configurada' : 'Configurar API Key'}
+                        </button>
+                        <div className="bg-emerald-500 text-slate-950 font-bold px-3 py-1 rounded-full text-xs uppercase tracking-wider hidden sm:block">
+                            TTS Studio
+                        </div>
                     </div>
                     <h1 className="text-3xl sm:text-4xl font-extrabold flex items-center gap-3 tracking-tight">
                         <svg className="w-9 h-9" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -489,8 +536,41 @@ ${block.text}`;
                         Studio Audio Script (TTS)
                     </h1>
                     <p className="mt-2 text-violet-100 opacity-90 text-sm sm:text-base max-w-2xl">
-                        Crea diálogos con más de 2 voces distintas simultáneamente. Modela acentos en inglés, tonos y emociones usando la tecnología de IA y expórtalo todo como un archivo de audio unificado.
+                        Crea diálogos fluidos generando el audio completo en 1 sola llamada a la API de Gemini, o preescucha líneas individuales por separado.
                     </p>
+
+                    {/* API Key & Model Settings Drawer */}
+                    {showKeyInput && (
+                        <div className="mt-4 p-4 bg-slate-900/90 rounded-2xl border border-violet-400/40 flex flex-col gap-3">
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs font-semibold text-violet-200 flex justify-between">
+                                    <span>Gemini API Key (o variable <code>VITE_GEMINI_API_KEY</code>)</span>
+                                    <span className="text-slate-400">{apiKey.trim() ? '●●●● Guardada' : 'No configurada'}</span>
+                                </label>
+                                <input
+                                    type="password"
+                                    value={apiKey}
+                                    onChange={(e) => handleApiKeyChange(e.target.value)}
+                                    placeholder="Pega tu Gemini API Key (AIzaSy...)"
+                                    className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded-xl text-sm border border-slate-700 focus:outline-none focus:border-violet-400 font-mono"
+                                />
+                            </div>
+
+                            <div className="flex flex-col gap-1">
+                                <label className="text-xs font-semibold text-violet-200 flex justify-between">
+                                    <span>Modelo de Gemini (o variable <code>VITE_GEMINI_MODEL</code>)</span>
+                                    <span className="text-slate-400 font-mono text-[11px]">{modelName}</span>
+                                </label>
+                                <input
+                                    type="text"
+                                    value={modelName}
+                                    onChange={(e) => handleModelChange(e.target.value)}
+                                    placeholder="gemini-2.5-flash-preview-tts"
+                                    className="w-full bg-slate-800 text-slate-100 px-3 py-2 rounded-xl text-sm border border-slate-700 focus:outline-none focus:border-violet-400 font-mono"
+                                />
+                            </div>
+                        </div>
+                    )}
                 </div>
 
                 {/* Tabs / Switcher */}
@@ -733,6 +813,14 @@ ${block.text}`;
                     {/* General Actions & Merged audio player */}
                     <div className="border-t border-slate-700/60 pt-6 mt-2 flex flex-col gap-6">
                         
+                        {/* Status Activity Bar */}
+                        {statusLog && (
+                            <div className="p-3 bg-slate-900/80 rounded-xl border border-violet-500/30 text-xs font-mono text-violet-300 flex items-center gap-2">
+                                <span className="inline-block w-2 h-2 rounded-full bg-violet-400 animate-pulse"></span>
+                                <span>{statusLog}</span>
+                            </div>
+                        )}
+
                         <div className="flex flex-col sm:flex-row gap-4">
                             <button
                                 onClick={handleGenerateAllAndMerge}
@@ -749,14 +837,14 @@ ${block.text}`;
                                             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                                             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                                         </svg>
-                                        Procesando script de diálogo...
+                                        Generando Audio Completo en Gemini...
                                     </>
                                 ) : (
                                     <>
                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path>
                                         </svg>
-                                        Generar & Combinar Audio
+                                        Generar Audio Completo (1 sola petición a Gemini)
                                     </>
                                 )}
                             </button>
@@ -769,7 +857,7 @@ ${block.text}`;
                                     <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
                                     </svg>
-                                    Descargar Pistas Individuales
+                                    Descargar Pistas Preescuchadas
                                 </button>
                             )}
                         </div>

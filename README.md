@@ -32,11 +32,12 @@ Antes de comenzar, asegúrate de tener instalado:
    ```
    *(o `npm install` si prefieres usar npm).*
 
-2. **Configurar la API Key**:
-   El proyecto utiliza una variable de entorno para conectarse con la API de Gemini. 
-   Crea o edita el archivo llamado `.env` en la raíz del proyecto y añade tu clave:
+2. **Configurar las Variables de Entorno**:
+   El proyecto utiliza variables de entorno para conectarse con la API de Gemini. 
+   Crea o edita el archivo llamado `.env` en la raíz del proyecto y añade tu clave y (opcionalmente) el modelo:
    ```env
    VITE_GEMINI_API_KEY=TU_API_KEY_AQUÍ
+   VITE_GEMINI_MODEL=gemini-2.5-flash-preview-tts
    ```
 
 ---
