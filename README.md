@@ -100,7 +100,6 @@ Los archivos compilados listos para desplegar se generarán dentro de la carpeta
 
 1. **Generación con Agente Guionista (Opcional)**: El usuario introduce una temática en la pestaña *Agente ADK*. El agente `scriptDirectorAgent` investiga en la web con `GOOGLE_SEARCH` y redacta el diálogo asignando personajes y estilos.
 2. **Edición de Diálogos**: El usuario puede ajustar los textos, personajes, acentos y ordenar las intervenciones en el *Editor de Bloques* o en *Script Raw*.
-3. **Preescucha Individual**: Al pulsar *Preescuchar* en una línea específica, se envía una petición puntual a Gemini TTS exclusivamente para ese bloque.
-4. **Síntesis Completa en 1 Llamada**: Al hacer clic en *Generar Audio Completo*, el agente `ttsOrchestratorAgent` consolida todo el guion con las instrucciones de dirección de cada personaje y realiza **una única petición** al endpoint de Gemini TTS:
-   `https://generativelanguage.googleapis.com/v1beta/models/{MODEL}:generateContent`
+3. **Preescucha Individual**: Al pulsar *Preescuchar* en una línea específica, el agente `ttsOrchestratorAgent` procesa de forma aislada ese bloque con `InMemoryRunner` de `@google/adk`.
+4. **Síntesis Completa en 1 Llamada**: Al hacer clic en *Generar Audio Completo*, el agente `ttsOrchestratorAgent` consolida todo el guion con las instrucciones de dirección de cada personaje y ejecuta la síntesis de audio de todo el guion de forma nativa con `InMemoryRunner` de `@google/adk` sin endpoints HTTP manuales.
 5. **Conversión PCM a WAV en el Cliente**: La respuesta con audio PCM en Base64 es procesada por `audioCodec.js`, ensamblando la cabecera del formato **WAV** directamente en el navegador y generando un objeto URL (`Blob`) listo para su reproducción y descarga.

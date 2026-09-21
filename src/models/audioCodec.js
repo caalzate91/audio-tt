@@ -1,5 +1,8 @@
-// Decodificación PCM y construcción de cabecera WAV
+// Decodificación PCM y construcción de cabecera WAV para datos de audio de @google/adk
 
+/**
+ * Convierte un Uint8Array de datos PCM a una URL WAV reproducible.
+ */
 export const pcmToWavUrlFromUint8 = (uint8Array, sampleRate = 24000) => {
     const buffer = new ArrayBuffer(44 + uint8Array.length);
     const view = new DataView(buffer);
@@ -33,17 +36,47 @@ export const pcmToWavUrlFromUint8 = (uint8Array, sampleRate = 24000) => {
     return URL.createObjectURL(blob);
 };
 
-export const pcmToWavUrl = (base64Data, sampleRate = 24000) => {
-    const binaryString = atob(base64Data);
-    const len = binaryString.length;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
+/**
+ * Convierte datos de audio (Base64 string, Uint8Array o ArrayBuffer) a WAV URL y bytes.
+ */
+export const processAudioDataToWav = (rawData, sampleRate = 24000, mimeType = '') => {
+    let bytes;
+
+    if (rawData instanceof Uint8Array) {
+        bytes = rawData;
+    } else if (rawData instanceof ArrayBuffer) {
+        bytes = new Uint8Array(rawData);
+    } else if (typeof rawData === 'string') {
+        const binaryString = atob(rawData);
+        const len = binaryString.length;
+        bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+        }
+    } else if (rawData && typeof rawData === 'object' && rawData.data) {
+        return processAudioDataToWav(rawData.data, sampleRate, rawData.mimeType || mimeType);
+    } else {
+        throw new Error('Formato de datos de audio no reconocido por el decodificador.');
     }
+
+    // Si ya tiene cabecera RIFF/WAV o es otro contenedor
+    if (mimeType.includes('audio/wav') || (bytes.length >= 4 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46)) {
+        const blob = new Blob([bytes], { type: 'audio/wav' });
+        return {
+            url: URL.createObjectURL(blob),
+            bytes
+        };
+    }
+
+    // Convertir PCM crudo a WAV con cabecera estándar
     return {
         url: pcmToWavUrlFromUint8(bytes, sampleRate),
         bytes
     };
+};
+
+export const pcmToWavUrl = (base64Data, sampleRate = 24000) => {
+    return processAudioDataToWav(base64Data, sampleRate);
 };
 
 export const triggerDownload = (url, filename) => {

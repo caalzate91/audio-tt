@@ -21,9 +21,10 @@ Todos los cambios notables de este proyecto se documentan en este archivo siguie
     - `RawScriptView.jsx`: Editor de texto plano para importar y sincronizar guiones rápidamente.
     - `AudioPlayerView.jsx`: Barra de estado en tiempo real, reproductor de audio WAV consolidado y botones de exportación.
   - **Componente Principal (`src/App.jsx`)**: Refactorizado como vista integradora raíz conectando controladores y sub-vistas.
-- **Integración de Agentes con `@google/adk`**:
-  - `src/agents/scriptDirectorAgent.js`: Agente `LlmAgent` con herramienta `GOOGLE_SEARCH` para investigar temas y redactar guiones multivoz automáticamente.
-  - `src/agents/ttsOrchestratorAgent.js`: Agente `LlmAgent` especializado en dirección vocal y orquestación de llamadas hacia Gemini TTS.
+- **Integración Nativa de Agentes con `@google/adk` (Sin Endpoints ni fetch manuales)**:
+  - `src/agents/scriptDirectorAgent.js`: Agente `LlmAgent` con modelo `Gemini`, ejecutado mediante `InMemoryRunner` con la herramienta `GOOGLE_SEARCH` para investigar temas y redactar guiones multivoz automáticamente extrayendo texto con `stringifyContent`.
+  - `src/agents/ttsOrchestratorAgent.js`: Agente `LlmAgent` con modelo `Gemini` y `generateContentConfig` para síntesis de audio (`responseModalities: ["AUDIO"]`), con extracción robusta de datos binarios y PCM para decodificación WAV a través de `@google/adk`.
+  - `src/models/audioCodec.js`: Soporte para procesar datos de audio binarios en múltiples formatos (Uint8Array, ArrayBuffer, Base64) y empaquetarlos en formato WAV compatible.
 - **Configuración Dinámica de Variables de Entorno**:
   - Soporte para la variable de entorno `VITE_GEMINI_MODEL` (por defecto `gemini-2.5-flash-preview-tts`).
   - Drawer desplegable en la interfaz para configurar o cambiar la API Key y el modelo directamente desde el navegador, con persistencia en `localStorage`.
